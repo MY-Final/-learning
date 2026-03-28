@@ -66,9 +66,12 @@ class FlowableDemoApplicationTests {
         List<Task> list = taskService.createTaskQuery()
                 .taskAssignee(zhangSan)
                 .list();
-        for (Task task : list) {
-            System.out.println("任务ID: " + task.getId());
+        if (list.size() > 0){
+            for (Task task : list) {
+                System.out.println("任务ID: " + task.getId());
+            }
         }
+        System.out.println("无任务实例");
     }
 
     /**
