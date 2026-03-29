@@ -69,6 +69,7 @@ public class ProcessModelDeployServiceImpl implements ProcessModelDeployService 
 
         validateUploadFile(file);
         final String fileName = Objects.requireNonNull(file.getOriginalFilename(), "fileName cannot be null");
+        log.info("开始处理流程上传, fileName={}", fileName);
 
         final String xml;
         try {
@@ -80,13 +81,16 @@ public class ProcessModelDeployServiceImpl implements ProcessModelDeployService 
             throw new IllegalArgumentException("流程文件内容不能为空");
         }
 
+        final String normalizedTenantId = normalizeBlankToNull(tenantId);
+        final String normalizedCategory = normalizeBlankToNull(category);
         final String realModelKey = StringUtils.hasText(modelKey) ? modelKey.trim() : parseModelKeyFromFileName(fileName);
         final String realModelName = StringUtils.hasText(modelName) ? modelName.trim() : realModelKey;
         final String uploader = StringUtils.hasText(operator) ? operator.trim() : "system";
         // 用内容摘要做版本内容指纹，后续可用于去重或审计对比。
         final String sha256 = sha256(xml);
+        log.info("流程上传参数已解析, modelKey={}, tenantId={}, operator={}", realModelKey, normalizedTenantId, uploader);
 
-        WfProcessModel model = findOrCreateModel(realModelKey, realModelName, category, tenantId, uploader);
+        WfProcessModel model = findOrCreateModel(realModelKey, realModelName, normalizedCategory, normalizedTenantId, uploader);
         final int nextVersion = resolveNextVersion(model.getId());
 
         WfProcessModelVersion modelVersion = new WfProcessModelVersion();
@@ -100,6 +104,7 @@ public class ProcessModelDeployServiceImpl implements ProcessModelDeployService 
         modelVersion.setUploadTime(new Date());
         modelVersion.setDeployStatus(0);
         modelVersionService.save(modelVersion);
+        log.info("流程版本存档成功, modelId={}, version={}", model.getId(), nextVersion);
 
         try {
             // 将上传 XML 作为部署资源直接提交给 Flowable。
@@ -120,6 +125,8 @@ public class ProcessModelDeployServiceImpl implements ProcessModelDeployService 
             processModelService.updateById(model);
 
             saveDeployLog(modelVersion.getId(), "AUTO_DEPLOY", 1, deployment.getId(), processDefinition == null ? null : processDefinition.getId(), "上传并自动部署成功", uploader);
+            log.info("流程部署成功, modelKey={}, version={}, deploymentId={}, processDefinitionId={}",
+                    realModelKey, nextVersion, deployment.getId(), processDefinition == null ? null : processDefinition.getId());
 
             ProcessDeployResultVO resultVO = new ProcessDeployResultVO();
             resultVO.setModelId(model.getId());
@@ -248,5 +255,12 @@ public class ProcessModelDeployServiceImpl implements ProcessModelDeployService 
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 算法不可用", e);
         }
+    }
+
+    private String normalizeBlankToNull(String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        return text.trim();
     }
 }
