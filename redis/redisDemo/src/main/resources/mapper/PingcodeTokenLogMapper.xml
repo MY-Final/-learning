@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.myfinal.redis.mapper.PingcodeTokenLogMapper">
+
+    <resultMap id="BaseResultMap" type="com.myfinal.redis.pojo.PingcodeTokenLog">
+            <id property="id" column="id" />
+            <result property="requestId" column="request_id" />
+            <result property="source" column="source" />
+            <result property="appName" column="app_name" />
+            <result property="clientId" column="client_id" />
+            <result property="tokenHash" column="token_hash" />
+            <result property="tokenPrefix" column="token_prefix" />
+            <result property="acquireStatus" column="acquire_status" />
+            <result property="errorCode" column="error_code" />
+            <result property="errorMessage" column="error_message" />
+            <result property="acquiredAt" column="acquired_at" />
+            <result property="expiresAt" column="expires_at" />
+            <result property="expiresIn" column="expires_in" />
+            <result property="httpStatus" column="http_status" />
+            <result property="responseBody" column="response_body" />
+            <result property="remark" column="remark" />
+            <result property="createdAt" column="created_at" />
+            <result property="updatedAt" column="updated_at" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,request_id,source,app_name,client_id,token_hash,
+        token_prefix,acquire_status,error_code,error_message,acquired_at,
+        expires_at,expires_in,http_status,response_body,remark,
+        created_at,updated_at
+    </sql>
+</mapper>
