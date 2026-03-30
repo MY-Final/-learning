@@ -1,6 +1,7 @@
 package com.myfinal.flow.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import cn.hutool.crypto.digest.DigestUtil;
 import com.myfinal.flow.dto.ProcessUploadDeployRequestDTO;
 import com.myfinal.flow.pojo.WfProcessDeployLog;
 import com.myfinal.flow.pojo.WfProcessModel;
@@ -10,11 +11,10 @@ import com.myfinal.flow.service.WfProcessDeployLogService;
 import com.myfinal.flow.service.WfProcessModelService;
 import com.myfinal.flow.service.WfProcessModelVersionService;
 import com.myfinal.flow.vo.ProcessDeployResultVO;
+import lombok.extern.slf4j.Slf4j;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.repository.Deployment;
 import org.flowable.engine.repository.ProcessDefinition;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -22,43 +22,42 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Date;
-import java.util.HexFormat;
 import java.util.Objects;
 
-@Service
 /**
  * 流程模型上传并自动部署实现。
  *
  * <p>核心流程：校验文件 -> 保存版本存档 -> 调用 Flowable 部署 -> 回写部署结果 -> 写部署日志。</p>
  */
+@Slf4j
+@Service
 public class ProcessModelDeployServiceImpl implements ProcessModelDeployService {
-
-    private static final Logger log = LoggerFactory.getLogger(ProcessModelDeployServiceImpl.class);
 
     private final WfProcessModelService processModelService;
     private final WfProcessModelVersionService modelVersionService;
     private final WfProcessDeployLogService deployLogService;
     private final RepositoryService repositoryService;
 
-    public ProcessModelDeployServiceImpl(WfProcessModelService processModelService, WfProcessModelVersionService modelVersionService, WfProcessDeployLogService deployLogService, RepositoryService repositoryService) {
+    public ProcessModelDeployServiceImpl(WfProcessModelService processModelService,
+                                         WfProcessModelVersionService modelVersionService,
+                                         WfProcessDeployLogService deployLogService,
+                                         RepositoryService repositoryService) {
         this.processModelService = processModelService;
         this.modelVersionService = modelVersionService;
         this.deployLogService = deployLogService;
         this.repositoryService = repositoryService;
     }
 
-    @Override
-    @Transactional(rollbackFor = Exception.class)
     /**
      * 上传 BPMN 并自动部署。
      *
      * <p>该方法与业务表写入、部署状态回写、部署日志写入保持在同一事务语义下，
      * 发生异常时会记录失败日志并抛出异常。</p>
      */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public ProcessDeployResultVO uploadAndDeploy(ProcessUploadDeployRequestDTO requestDTO) {
         MultipartFile file = requestDTO.getFile();
         String modelKey = requestDTO.getModelKey();
@@ -152,7 +151,11 @@ public class ProcessModelDeployServiceImpl implements ProcessModelDeployService 
     /**
      * 按 modelKey + tenantId 查询模型，不存在则创建。
      */
-    private WfProcessModel findOrCreateModel(String modelKey, String modelName, String category, String tenantId, String operator) {
+    private WfProcessModel findOrCreateModel(String modelKey,
+                                             String modelName,
+                                             String category,
+                                             String tenantId,
+                                             String operator) {
         LambdaQueryWrapper<WfProcessModel> query = new LambdaQueryWrapper<>();
         query.eq(WfProcessModel::getModelKey, modelKey);
         if (StringUtils.hasText(tenantId)) {
@@ -197,7 +200,13 @@ public class ProcessModelDeployServiceImpl implements ProcessModelDeployService 
     /**
      * 记录部署动作日志（成功/失败都写入）。
      */
-    private void saveDeployLog(Long modelVersionId, String actionType, int success, String deploymentId, String processDefinitionId, String message, String operator) {
+    private void saveDeployLog(Long modelVersionId,
+                               String actionType,
+                               int success,
+                               String deploymentId,
+                               String processDefinitionId,
+                               String message,
+                               String operator) {
         WfProcessDeployLog deployLog = new WfProcessDeployLog();
         deployLog.setModelVersionId(modelVersionId);
         deployLog.setActionType(actionType);
@@ -248,13 +257,7 @@ public class ProcessModelDeployServiceImpl implements ProcessModelDeployService 
      * 计算文本 SHA-256 摘要。
      */
     private String sha256(String text) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(text.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(bytes);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 算法不可用", e);
-        }
+        return DigestUtil.sha256Hex(text);
     }
 
     private String normalizeBlankToNull(String text) {
