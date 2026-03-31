@@ -1,0 +1,27 @@
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/redis_learning?characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: lxy666666
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+    devtools:
+      restart:
+        enabled: false
+
+server:
+  port: 18700
+
+pingcode:
+  app-name: redis-demo
+  rest-api-root: https://open.pingcode.com
+  oauth2-root: https://open.pingcode.com/oauth2
+  token:
+    grant-type: client_credentials
+    client-id: nNoyvLLzACRK
+    client-secret: oJIdcepaviPINVXBalIJSUbp
