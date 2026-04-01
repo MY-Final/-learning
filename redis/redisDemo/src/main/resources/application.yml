@@ -10,12 +10,22 @@ spring:
     password: lxy666666
     driver-class-name: com.mysql.cj.jdbc.Driver
 
-    devtools:
-      restart:
-        enabled: false
+  cache:
+    caffeine:
+      spec: maximumSize=100,expireAfterWrite=30m
 
 server:
   port: 18700
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
 
 pingcode:
   app-name: redis-demo
@@ -25,3 +35,8 @@ pingcode:
     grant-type: client_credentials
     client-id: nNoyvLLzACRK
     client-secret: oJIdcepaviPINVXBalIJSUbp
+
+logging:
+  level:
+    com.myfinal.redis.service: DEBUG
+    com.myfinal.redis.controller: INFO

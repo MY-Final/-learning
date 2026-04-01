@@ -4,95 +4,117 @@ import cn.hutool.crypto.SecureUtil;
 import com.alibaba.fastjson2.JSON;
 import com.myfinal.redis.config.PingcodeProperties;
 import com.myfinal.redis.dto.PingcodeTokenDTO;
-import com.myfinal.redis.exception.BusinessException;
 import com.myfinal.redis.pojo.PingcodeTokenLog;
-import com.myfinal.redis.service.PingcodeAuthService;
 import com.myfinal.redis.service.PingcodeTokenLogService;
+import com.myfinal.redis.service.TokenCacheService;
 import com.myfinal.redis.vo.ApiResponse;
 import com.myfinal.redis.vo.PingcodeTokenVO;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.util.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag(name = "PingCode Token 管理", description = "企业 Token 获取和缓存管理")
 @RestController
 @RequestMapping("/api/pingcode")
 public class PingcodeController {
 
-    private static final String ENTERPRISE_TOKEN_CACHE_KEY = "pingcode:token:enterprise";
+    private static final Logger log = LoggerFactory.getLogger(PingcodeController.class);
 
-    private final PingcodeAuthService pingcodeAuthService;
-    private final StringRedisTemplate stringRedisTemplate;
+    private final TokenCacheService tokenCacheService;
     private final PingcodeTokenLogService pingcodeTokenLogService;
     private final PingcodeProperties pingcodeProperties;
 
-    public PingcodeController(PingcodeAuthService pingcodeAuthService,
-                              StringRedisTemplate stringRedisTemplate,
+    public PingcodeController(TokenCacheService tokenCacheService,
                               PingcodeTokenLogService pingcodeTokenLogService,
                               PingcodeProperties pingcodeProperties) {
-        this.pingcodeAuthService = pingcodeAuthService;
-        this.stringRedisTemplate = stringRedisTemplate;
+        this.tokenCacheService = tokenCacheService;
         this.pingcodeTokenLogService = pingcodeTokenLogService;
         this.pingcodeProperties = pingcodeProperties;
     }
 
     @GetMapping("/token")
+    @Operation(summary = "获取企业 token", description = "从双层缓存获取 token，如果缓存失效则从 PingCode API 刷新")
     public ApiResponse<PingcodeTokenVO> getEnterpriseToken() {
-        PingcodeTokenDTO tokenDTO = pingcodeAuthService.getEnterpriseToken();
-        cacheEnterpriseToken(tokenDTO);
-        saveTokenLog(tokenDTO);
-        PingcodeTokenVO tokenVO = new PingcodeTokenVO(tokenDTO.getAccessToken(), tokenDTO.getTokenType(), tokenDTO.getExpiresIn());
-        return ApiResponse.success("获取token成功", tokenVO);
+        log.info("接收到获取 token 请求");
+
+        PingcodeTokenDTO tokenDTO = tokenCacheService.getEnterpriseToken();
+        saveTokenLog(tokenDTO, "auto_cache");
+
+        PingcodeTokenVO tokenVO = new PingcodeTokenVO(
+                tokenDTO.getAccessToken(),
+                tokenDTO.getTokenType(),
+                tokenDTO.getExpiresIn()
+        );
+        return ApiResponse.success("获取 token 成功", tokenVO);
     }
 
-    private void saveTokenLog(PingcodeTokenDTO tokenDTO) {
-        PingcodeTokenLog log = new PingcodeTokenLog();
-        log.setRequestId(UUID.randomUUID().toString());
-        log.setSource("pingcode_openapi");
-        log.setAppName(pingcodeProperties.getAppName());
-        log.setClientId(pingcodeProperties.getToken().getClientId());
-        log.setTokenHash(SecureUtil.sha256(tokenDTO.getAccessToken()));
-        log.setTokenPrefix(tokenDTO.getAccessToken().substring(0, Math.min(8, tokenDTO.getAccessToken().length())));
-        log.setAcquireStatus(1);
-        log.setAcquiredAt(LocalDateTime.now());
-        log.setExpiresIn(toIntSafely(tokenDTO.getExpiresIn()));
-        log.setExpiresAt(resolveExpiresAt(tokenDTO.getExpiresIn()));
-        log.setHttpStatus(200);
-        log.setResponseBody(JSON.toJSONString(tokenDTO));
-        log.setRemark("手动接口获取企业token并写入redis");
-        boolean saved = pingcodeTokenLogService.save(log);
-        if (!saved) {
-            throw new BusinessException(500, "token日志写入失败");
-        }
+        @GetMapping("/token/refresh")
+    @Operation(summary = "强制刷新 token", description = "绕过缓存，直接从 PingCode API 获取新 token")
+    public ApiResponse<PingcodeTokenVO> refreshEnterpriseToken() {
+        log.info("接收到强制刷新 token 请求");
+
+        PingcodeTokenDTO tokenDTO = tokenCacheService.refreshEnterpriseToken();
+        saveTokenLog(tokenDTO, "manual_refresh");
+
+        PingcodeTokenVO tokenVO = new PingcodeTokenVO(
+                tokenDTO.getAccessToken(),
+                tokenDTO.getTokenType(),
+                tokenDTO.getExpiresIn()
+        );
+        return ApiResponse.success("刷新 token 成功", tokenVO);
     }
 
-    private void cacheEnterpriseToken(PingcodeTokenDTO tokenDTO) {
-        if (!StringUtils.hasText(tokenDTO.getAccessToken())) {
-            throw new BusinessException(502, "PingCode返回token为空");
-        }
-        long ttlSeconds = calculateTtlSeconds(tokenDTO.getExpiresIn());
-        stringRedisTemplate.opsForValue().set(
-                ENTERPRISE_TOKEN_CACHE_KEY,
-                JSON.toJSONString(tokenDTO),
-                ttlSeconds,
-                TimeUnit.SECONDS);
+    @DeleteMapping("/token/cache")
+    @Operation(summary = "清除 token 缓存", description = "清除本地和 Redis 中的 token 缓存")
+    public ApiResponse<Void> clearCache() {
+        log.info("接收到清除缓存请求");
+        tokenCacheService.clearCache();
+        return ApiResponse.success("清除缓存成功", null);
     }
 
-    private long calculateTtlSeconds(Long expiresIn) {
-        if (expiresIn == null || expiresIn <= 0) {
-            return 30L * 24 * 60 * 60;
+    @GetMapping("/token/cache/stats")
+    @Operation(summary = "获取缓存统计", description = "返回缓存命中率等统计信息")
+    public ApiResponse<TokenCacheService.CacheStats> getCacheStats() {
+        TokenCacheService.CacheStats stats = tokenCacheService.getCacheStats();
+        return ApiResponse.success("获取缓存统计成功", stats);
+    }
+
+    private void saveTokenLog(PingcodeTokenDTO tokenDTO, String acquireType) {
+        try {
+            PingcodeTokenLog logEntry = new PingcodeTokenLog();
+            logEntry.setRequestId(UUID.randomUUID().toString());
+            logEntry.setSource("pingcode_openapi");
+            logEntry.setAppName(pingcodeProperties.getAppName());
+            logEntry.setClientId(pingcodeProperties.getToken().getClientId());
+            logEntry.setTokenHash(SecureUtil.sha256(tokenDTO.getAccessToken()));
+            logEntry.setTokenPrefix(tokenDTO.getAccessToken().substring(0, Math.min(8, tokenDTO.getAccessToken().length())));
+            logEntry.setAcquireStatus(1);
+            logEntry.setAcquiredAt(LocalDateTime.now());
+            logEntry.setExpiresIn(toIntSafely(tokenDTO.getExpiresIn()));
+            logEntry.setExpiresAt(resolveExpiresAt(tokenDTO.getExpiresIn()));
+            logEntry.setHttpStatus(200);
+            logEntry.setResponseBody(JSON.toJSONString(tokenDTO));
+            logEntry.setRemark(acquireType + " - 双层缓存优化版本");
+
+            boolean saved = pingcodeTokenLogService.save(logEntry);
+            if (!saved) {
+                log.warn("token 日志写入失败");
+            } else {
+                log.debug("token 日志写入成功，requestId={}", logEntry.getRequestId());
+            }
+        } catch (Exception e) {
+            log.error("保存 token 日志失败", e);
+            // 不抛出异常，避免影响主流程
         }
-        long now = Instant.now().getEpochSecond();
-        if (expiresIn > now) {
-            return Math.max(expiresIn - now, 60L);
-        }
-        return Math.max(expiresIn, 60L);
     }
 
     private LocalDateTime resolveExpiresAt(Long expiresIn) {
